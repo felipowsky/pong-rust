@@ -51,7 +51,7 @@ fn render_entity(canvas: &mut WindowCanvas, entity: &Entity) -> Result<(), Strin
 fn move_paddle(paddle: &mut Entity, movement: i32) {
     let position_y = paddle.position.y + movement;
     let position = Point::new(paddle.position.x, position_y);
-    let collider_rect = Rect::from_center(position, paddle.size.0, paddle.size.1);
+    let collider_rect = Rect::from_center(position, paddle.collider_size.0, paddle.collider_size.1);
     let window_top = -(WINDOW_HALF_SIZE.1 as i32);
     let window_bottom = WINDOW_HALF_SIZE.1 as i32;
     if collider_rect.top() >= window_top && collider_rect.bottom() <= window_bottom {
