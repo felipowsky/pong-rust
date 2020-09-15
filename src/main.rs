@@ -5,16 +5,19 @@ use sdl2::render::{WindowCanvas, Texture};
 use sdl2::rect::{Point, Rect};
 use sdl2::image::{self, LoadTexture, InitFlag};
 use std::time::Duration;
+use std::cmp::{max, min};
 
 const TARGET_FPS: u8 = 60;
 const BACKGROUND_COLOR: Color = Color::RGB(0, 0, 0);
 const WINDOW_SIZE: (u32, u32) = (800, 600);
 const WINDOW_HALF_SIZE: (u32, u32) = (WINDOW_SIZE.0 / 2, WINDOW_SIZE.1 / 2);
 const PADDLE_SIZE: (u32, u32) = (52, 150);
-const PADDLE_PADDING: u8 = 2;
+const PADDLE_COLLIDER_SIZE: (u32, u32) = (PADDLE_SIZE.0 - 42, PADDLE_SIZE.1 - 40);
 const PADDLE_SPEED: u8 = 4;
 const BALL_SIZE: (u32, u32) = (51, 51);
-const BALL_SPEED: u8 = 3;
+const BALL_RADIUS: u32 = 11;
+const BALL_SPEED: u8 = 2;
+const BALL_MAX_SPEED: u8 = 15;
 const SPRITESHEET_FILENAME: &str = "assets/spritesheet.png";
 
 struct Sprite<'a> {
@@ -25,8 +28,13 @@ struct Sprite<'a> {
 struct Entity<'a> {
     position: Point,
     size: (u32, u32),
-    collider_size: (u32, u32),
     sprite: Sprite<'a>
+}
+
+enum BallState {
+    Collided,
+    Scored,
+    Moving
 }
 
 fn render(canvas: &mut WindowCanvas, background: Color, entities: &Vec<Entity>) -> Result<(), String> {
@@ -51,7 +59,7 @@ fn render_entity(canvas: &mut WindowCanvas, entity: &Entity) -> Result<(), Strin
 fn move_paddle(paddle: &mut Entity, movement: i32) {
     let position_y = paddle.position.y + movement;
     let position = Point::new(paddle.position.x, position_y);
-    let collider_rect = Rect::from_center(position, paddle.collider_size.0, paddle.collider_size.1);
+    let collider_rect = Rect::from_center(position, PADDLE_COLLIDER_SIZE.0, PADDLE_COLLIDER_SIZE.1);
     let window_top = -(WINDOW_HALF_SIZE.1 as i32);
     let window_bottom = WINDOW_HALF_SIZE.1 as i32;
     if collider_rect.top() >= window_top && collider_rect.bottom() <= window_bottom {
@@ -61,18 +69,37 @@ fn move_paddle(paddle: &mut Entity, movement: i32) {
 
 fn move_ball(ball: &mut Entity, movement: &mut Point) {
     let position = ball.position + *movement;
-    let collider_rect = Rect::from_center(position, ball.collider_size.0, ball.collider_size.1);
-    let window_right = WINDOW_HALF_SIZE.0 as i32;
-    let window_left = -(WINDOW_HALF_SIZE.0 as i32);
-    if collider_rect.right() > window_right || collider_rect.left() < window_left {
-        movement.x = movement.x * -1;
-    }
     let window_top = -(WINDOW_HALF_SIZE.1 as i32);
     let window_bottom = WINDOW_HALF_SIZE.1 as i32;
-    if collider_rect.top() < window_top || collider_rect.bottom() > window_bottom {
+    if position.y - (BALL_RADIUS as i32) < window_top || position.y + (BALL_RADIUS as i32) > window_bottom {
         movement.y = -movement.y;
     }
     ball.position += *movement;
+}
+
+fn update_ball_state(ball: &Entity, ball_movement: Point, paddle: &Entity) -> BallState {
+    if ball_movement.x == 0 {
+        return BallState::Moving
+    }
+    let paddle_collider_rect = Rect::from_center(paddle.position, PADDLE_COLLIDER_SIZE.0, PADDLE_COLLIDER_SIZE.1);
+    if ball_movement.x > 0 {
+        if ball.position.x + (BALL_RADIUS as i32) > paddle_collider_rect.left() {
+            if ball.position.y >= paddle_collider_rect.top_left().y && ball.position.y <= paddle_collider_rect.bottom_left().y {
+                return BallState::Collided;
+            } else {
+                return BallState::Scored;
+            }
+        }
+    } else {
+        if ball.position.x - (BALL_RADIUS as i32) < paddle_collider_rect.right() {
+            if ball.position.y >= paddle_collider_rect.top_right().y && ball.position.y <= paddle_collider_rect.bottom_right().y {
+                return BallState::Collided;
+            } else {
+                return BallState::Scored;
+            }
+        }
+    }
+    return BallState::Moving
 }
 
 fn main() -> Result<(), String> {
@@ -90,9 +117,8 @@ fn main() -> Result<(), String> {
     let fps = TARGET_FPS as u32;
     let mut entities: Vec<Entity> = Vec::new();
     entities.push(Entity {
-        position: Point::new(-(WINDOW_HALF_SIZE.0 as i32) + (PADDLE_SIZE.0 as i32 + PADDLE_PADDING as i32), 0),
+        position: Point::new(-(WINDOW_HALF_SIZE.0 as i32) + PADDLE_COLLIDER_SIZE.0 as i32, 0),
         size: PADDLE_SIZE,
-        collider_size: PADDLE_SIZE,
         sprite: Sprite {
             texture: &texture,
             rect: Rect::new(0, 0, PADDLE_SIZE.0, PADDLE_SIZE.1)
@@ -100,9 +126,8 @@ fn main() -> Result<(), String> {
     });
     let paddle1_index = entities.len() - 1; 
     entities.push(Entity {
-        position: Point::new((WINDOW_HALF_SIZE.0 as i32) - (PADDLE_SIZE.0 as i32 + PADDLE_PADDING as i32), 0),
+        position: Point::new((WINDOW_HALF_SIZE.0 as i32) - PADDLE_COLLIDER_SIZE.0 as i32, 0),
         size: PADDLE_SIZE,
-        collider_size: PADDLE_SIZE,
         sprite: Sprite {
             texture: &texture,
             rect: Rect::new(52, 0, PADDLE_SIZE.0, PADDLE_SIZE.1)
@@ -112,13 +137,13 @@ fn main() -> Result<(), String> {
     entities.push(Entity {
         position: Point::new(0, 0),
         size: BALL_SIZE,
-        collider_size: BALL_SIZE,
         sprite: Sprite {
             texture: &texture,
             rect: Rect::new(100, 0, BALL_SIZE.0, BALL_SIZE.1)
         }
     });
     let ball_index = entities.len() - 1;
+    let mut score: (u64, u64) = (0, 0);
     let mut paddle1_movement: i32 = 0;
     let mut paddle2_movement: i32 = 0;
     let mut ball_movement = Point::new(BALL_SPEED as i32, BALL_SPEED as i32);
@@ -157,6 +182,24 @@ fn main() -> Result<(), String> {
         move_ball(&mut entities[ball_index], &mut ball_movement);
         move_paddle(&mut entities[paddle1_index], paddle1_movement);
         move_paddle(&mut entities[paddle2_index], paddle2_movement);
+        let paddle_index_collision = if ball_movement.x > 0 { paddle2_index } else { paddle1_index };
+        match update_ball_state(&entities[ball_index], ball_movement, &entities[paddle_index_collision]) {
+            BallState::Scored => {
+                if ball_movement.x > 0 {
+                    score.0 += 1
+                } else {
+                    score.1 += 1
+                }
+                ball_movement = Point::new(BALL_SPEED as i32, BALL_SPEED as i32);
+                entities[ball_index].position = Point::new(0, 0);
+            },
+            BallState::Collided => {
+                ball_movement.x = -ball_movement.x;
+                ball_movement.x += if ball_movement.x > 0 { 1 } else { -1 };
+                ball_movement.x = if ball_movement.x > 0 { min(ball_movement.x, BALL_MAX_SPEED as i32) } else { max(ball_movement.x, -(BALL_MAX_SPEED as i32)) };
+            },
+            BallState::Moving => (),
+        }
         // Render
         render(&mut canvas, BACKGROUND_COLOR, &entities)?;
         // Time management
