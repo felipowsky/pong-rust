@@ -14,7 +14,7 @@ const PADDLE_SIZE: (u32, u32) = (52, 150);
 const PADDLE_PADDING: u8 = 2;
 const PADDLE_SPEED: u8 = 4;
 const BALL_SIZE: (u32, u32) = (51, 51);
-const BALL_SPEED: u8 = 1;
+const BALL_SPEED: u8 = 3;
 const SPRITESHEET_FILENAME: &str = "assets/spritesheet.png";
 
 struct Sprite<'a> {
@@ -57,6 +57,22 @@ fn move_paddle(paddle: &mut Entity, movement: i32) {
     if collider_rect.top() >= window_top && collider_rect.bottom() <= window_bottom {
         paddle.position.y = position_y;
     }
+}
+
+fn move_ball(ball: &mut Entity, movement: &mut Point) {
+    let position = ball.position + *movement;
+    let collider_rect = Rect::from_center(position, ball.collider_size.0, ball.collider_size.1);
+    let window_right = WINDOW_HALF_SIZE.0 as i32;
+    let window_left = -(WINDOW_HALF_SIZE.0 as i32);
+    if collider_rect.right() > window_right || collider_rect.left() < window_left {
+        movement.x = movement.x * -1;
+    }
+    let window_top = -(WINDOW_HALF_SIZE.1 as i32);
+    let window_bottom = WINDOW_HALF_SIZE.1 as i32;
+    if collider_rect.top() < window_top || collider_rect.bottom() > window_bottom {
+        movement.y = -movement.y;
+    }
+    ball.position += *movement;
 }
 
 fn main() -> Result<(), String> {
@@ -138,9 +154,9 @@ fn main() -> Result<(), String> {
             }
         }
         // Update
+        move_ball(&mut entities[ball_index], &mut ball_movement);
         move_paddle(&mut entities[paddle1_index], paddle1_movement);
         move_paddle(&mut entities[paddle2_index], paddle2_movement);
-        entities[ball_index].position += ball_movement;
         // Render
         render(&mut canvas, BACKGROUND_COLOR, &entities)?;
         // Time management
