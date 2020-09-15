@@ -3,34 +3,46 @@ use sdl2::keyboard::Keycode;
 use sdl2::pixels::Color;
 use sdl2::render::{WindowCanvas, Texture};
 use sdl2::rect::{Point, Rect};
-use sdl2::sys::{SDL_GetPerformanceCounter, SDL_GetPerformanceFrequency};
-use sdl2::image::{self, InitFlag};
+use sdl2::image::{self, LoadTexture, InitFlag};
 use std::time::Duration;
 
 const TARGET_FPS: u8 = 60;
 const BACKGROUND_COLOR: Color = Color::RGB(0, 0, 0);
 const WINDOW_SIZE: (u32, u32) = (800, 600);
+const PADDLE_SIZE: (u32, u32) = (52, 150);
+const PADDLE_PADDING: u8 = 2;
+const BALL_SIZE: (u32, u32) = (51, 51);
+const SPRITESHEET_FILENAME: &str = "assets/spritesheet.png";
 
-fn render(canvas: &mut WindowCanvas, background: Color) -> Result<(), String> {
+struct Sprite<'a> {
+    texture: &'a Texture<'a>,
+    rect: Rect
+}
+
+struct Entity<'a> {
+    position: Point,
+    size: (u32, u32),
+    sprite: Sprite<'a>
+}
+
+fn render(canvas: &mut WindowCanvas, background: Color, entities: &Vec<Entity>) -> Result<(), String> {
     canvas.set_draw_color(background);
     canvas.clear();
     let window_size = canvas.output_size()?;
-    // TODO: Render entities
+    for entity in entities {
+        render_entity(canvas, window_size, entity)?;
+    }
     canvas.present();
     Ok(())
 }
 
-fn render_entity(canvas: &mut WindowCanvas, window_size: (u32, u32), entity_position: Point, entity_size: (u32, u32), entity_rect: Rect, entity_texture: &Texture) -> Result<(), String> {
+fn render_entity(canvas: &mut WindowCanvas, window_size: (u32, u32), entity: &Entity) -> Result<(), String> {
     // Treat the center of the screen as the (0, 0) coordinate
     let center_screen = Point::new(window_size.0 as i32 / 2, window_size.1 as i32 / 2);
-    let position_in_screen = center_screen + entity_position;
-    let rect = Rect::from_center(position_in_screen, entity_size.0, entity_size.1);
-    canvas.copy(entity_texture, entity_rect, rect)?;
+    let position_in_screen = center_screen + entity.position;
+    let rect = Rect::from_center(position_in_screen, entity.size.0, entity.size.1);
+    canvas.copy(entity.sprite.texture, entity.sprite.rect, rect)?;
     Ok(())
-}
-
-fn update() {
-    // TODO: Update entities
 }
 
 fn main() -> Result<(), String> {
@@ -43,24 +55,38 @@ fn main() -> Result<(), String> {
         .expect("Could not initialize window");
     let mut canvas = window.into_canvas().build().expect("Could not create a canvas");
     let texture_creator = canvas.texture_creator();
-    // TODO: Create textures
+    let texture = texture_creator.load_texture(SPRITESHEET_FILENAME)?;
     let mut event_pump = sdl_context.event_pump()?;
     let fps = TARGET_FPS as u32;
-    let mut performance_counter: u64;
-    unsafe { performance_counter = SDL_GetPerformanceCounter(); }
-    let mut last_performance_counter: u64 = 0;
-    let mut performance_frequency: u64 = 0;
-    let mut delta_time: f32 = 0.0;
-    let mut movement: Point = Point::new(0, 0);
-    'running: loop {
-        movement.x = 0;
-        movement.y = 0;
-        last_performance_counter = performance_counter;
-        unsafe { 
-            performance_counter = SDL_GetPerformanceCounter();
-            performance_frequency = SDL_GetPerformanceFrequency();
+    let mut entities: Vec<Entity> = Vec::new();
+    let mut paddle1 = Entity {
+        position: Point::new(-(WINDOW_SIZE.0 as i32 / 2) + (PADDLE_SIZE.0 as i32 + PADDLE_PADDING as i32), 0),
+        size: PADDLE_SIZE,
+        sprite: Sprite {
+            texture: &texture,
+            rect: Rect::new(0, 0, PADDLE_SIZE.0, PADDLE_SIZE.1)
         }
-        delta_time = ((performance_counter - last_performance_counter) * 1000) as f32 / performance_frequency as f32;
+    };
+    entities.push(paddle1);
+    let mut paddle2 = Entity {
+        position: Point::new((WINDOW_SIZE.0 as i32 / 2) - (PADDLE_SIZE.0 as i32 + PADDLE_PADDING as i32), 0),
+        size: PADDLE_SIZE,
+        sprite: Sprite {
+            texture: &texture,
+            rect: Rect::new(52, 0, PADDLE_SIZE.0, PADDLE_SIZE.1)
+        }
+    };
+    entities.push(paddle2);
+    let mut ball = Entity {
+        position: Point::new(0, 0),
+        size: BALL_SIZE,
+        sprite: Sprite {
+            texture: &texture,
+            rect: Rect::new(100, 0, BALL_SIZE.0, BALL_SIZE.1)
+        }
+    };
+    entities.push(ball);
+    'running: loop {
         // Handle events
         for event in event_pump.poll_iter() {
             match event {
@@ -79,10 +105,8 @@ fn main() -> Result<(), String> {
                 _ => {}
             }
         }
-        // Update
-        update();
         // Render
-        render(&mut canvas, BACKGROUND_COLOR)?;
+        render(&mut canvas, BACKGROUND_COLOR, &entities)?;
         // Time management
         ::std::thread::sleep(Duration::new(0, 1_000_000_000u32 / fps));
     }
