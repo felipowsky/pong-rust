@@ -1,10 +1,11 @@
 use sdl2::event::Event;
 use sdl2::keyboard::Keycode;
 use sdl2::pixels::Color;
-use sdl2::render::{WindowCanvas, Texture};
+use sdl2::render::{WindowCanvas, Texture, TextureCreator, TextureQuery};
 use sdl2::rect::{Point, Rect};
 use sdl2::image::{self, LoadTexture};
 use sdl2::mixer::{self, DEFAULT_CHANNELS, AUDIO_S16LSB};
+use sdl2::ttf::{self, Font};
 use std::time::Duration;
 use std::cmp::{max, min};
 
@@ -22,6 +23,7 @@ const BALL_MAX_SPEED: u8 = 15;
 const SPRITESHEET_FILENAME: &str = "assets/spritesheet.png";
 const POP_SOUND_FILENAME: &str = "assets/pop.ogg";
 const SCORE_SOUND_FILENAME: &str = "assets/score.ogg";
+const FONT_FILENAME: &str = "assets/sansation.ttf";
 
 struct Sprite<'a> {
     texture: &'a Texture<'a>,
@@ -45,22 +47,38 @@ enum BallMoveState {
     Moving
 }
 
-fn render(canvas: &mut WindowCanvas, background: Color, entities: &Vec<Entity>) -> Result<(), String> {
+fn render<T>(canvas: &mut WindowCanvas, background: Color, texture_creator: &TextureCreator<T>, font: &Font, entities: &Vec<Entity>, score: (u64, u64)) -> Result<(), String> {
     canvas.set_draw_color(background);
     canvas.clear();
     for entity in entities {
         render_entity(canvas, entity)?;
     }
+    let score_position = Point::new(-(WINDOW_HALF_SIZE.0 as i32) / 2, -(WINDOW_HALF_SIZE.1 as i32) + 60);
+    render_text(canvas, &texture_creator, &font, &format!("{}", score.0), Color::RED, score_position)?;
+    let score_position = Point::new(WINDOW_HALF_SIZE.0 as i32 / 2, -(WINDOW_HALF_SIZE.1 as i32) + 60);
+    render_text(canvas, &texture_creator, &font, &format!("{}", score.1), Color::BLUE, score_position)?;
     canvas.present();
     Ok(())
 }
 
 fn render_entity(canvas: &mut WindowCanvas, entity: &Entity) -> Result<(), String> {
-    // Treat the center of the screen as the (0, 0) coordinate
     let center_screen = Point::new(WINDOW_HALF_SIZE.0 as i32, WINDOW_HALF_SIZE.1 as i32);
     let position_in_screen = center_screen + entity.position;
     let rect = Rect::from_center(position_in_screen, entity.size.0, entity.size.1);
     canvas.copy(entity.sprite.texture, entity.sprite.rect, rect)?;
+    Ok(())
+}
+
+fn render_text<T>(canvas: &mut WindowCanvas, texture_creator: &TextureCreator<T>, font: &Font, text: &str, color: Color, position: Point) -> Result<(), String> {
+    let surface = font.render(text)
+        .blended(color).map_err(|e| e.to_string())?;
+    let texture = texture_creator.create_texture_from_surface(&surface)
+        .map_err(|e| e.to_string())?;
+    let TextureQuery { width, height, .. } = texture.query();
+    let center_screen = Point::new(WINDOW_HALF_SIZE.0 as i32, WINDOW_HALF_SIZE.1 as i32);
+    let position_in_screen = center_screen + position;
+    let rect = Rect::from_center(position_in_screen, width, height);
+    canvas.copy(&texture, None, rect)?;
     Ok(())
 }
 
@@ -79,10 +97,12 @@ fn move_ball(ball: &mut Entity, movement: &mut Point) -> BallMoveState {
     let position = ball.position + *movement;
     let window_top = -(WINDOW_HALF_SIZE.1 as i32);
     let window_bottom = WINDOW_HALF_SIZE.1 as i32;
-    let mut result = BallMoveState::Moving;
+    let result: BallMoveState;
     if position.y - (BALL_RADIUS as i32) < window_top || position.y + (BALL_RADIUS as i32) > window_bottom {
         movement.y = -movement.y;
         result = BallMoveState::WallCollision;
+    } else {
+        result = BallMoveState::Moving;
     }
     ball.position += *movement;
     result
@@ -116,14 +136,12 @@ fn update_ball_state(ball: &Entity, ball_movement: Point, paddle: &Entity) -> Ba
 fn main() -> Result<(), String> {
     let sdl_context = sdl2::init()?;
     let _sdl_image_context = image::init(image::InitFlag::PNG)?;
+    let sdl_ttf_context = ttf::init().map_err(|e| e.to_string())?;
     let _sdl_audio = sdl_context.audio()?;
-    let frequency = 44_100;
-    let format = AUDIO_S16LSB;
-    let channels = DEFAULT_CHANNELS;
-    let chunk_size = 1_024;
-    sdl2::mixer::open_audio(frequency, format, channels, chunk_size)?;
+    sdl2::mixer::open_audio(44_100, AUDIO_S16LSB, DEFAULT_CHANNELS, 1_024)?;
     let _sdl_mixer_context = mixer::init(mixer::InitFlag::OGG)?;
     sdl2::mixer::allocate_channels(4);
+    let font = sdl_ttf_context.load_font(FONT_FILENAME, 60)?;
     let pop_sound = sdl2::mixer::Music::from_file(POP_SOUND_FILENAME)?;
     let score_sound = sdl2::mixer::Music::from_file(SCORE_SOUND_FILENAME)?;
     let video_subsystem = sdl_context.video()?;
@@ -209,13 +227,16 @@ fn main() -> Result<(), String> {
         let paddle_index_collision = if ball_movement.x > 0 { paddle2_index } else { paddle1_index };
         match update_ball_state(&entities[ball_index], ball_movement, &entities[paddle_index_collision]) {
             BallUpdateState::Scoring => {
+                let x_movement: i32;
                 if ball_movement.x > 0 {
-                    score.0 += 1
+                    score.0 += 1;
+                    x_movement = -(BALL_SPEED as i32);
                 } else {
-                    score.1 += 1
+                    score.1 += 1;
+                    x_movement = BALL_SPEED as i32;
                 }
                 score_sound.play(1)?;
-                ball_movement = Point::new(BALL_SPEED as i32, BALL_SPEED as i32);
+                ball_movement = Point::new(x_movement, BALL_SPEED as i32);
                 entities[ball_index].position = Point::new(0, 0);
             },
             BallUpdateState::PaddleCollision => {
@@ -227,7 +248,7 @@ fn main() -> Result<(), String> {
             BallUpdateState::Moving => (),
         }
         // Render
-        render(&mut canvas, BACKGROUND_COLOR, &entities)?;
+        render(&mut canvas, BACKGROUND_COLOR, &texture_creator, &font, &entities, score)?;
         // Time management
         ::std::thread::sleep(Duration::new(0, 1_000_000_000u32 / fps));
     }
