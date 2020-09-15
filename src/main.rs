@@ -9,10 +9,12 @@ use std::time::Duration;
 const TARGET_FPS: u8 = 60;
 const BACKGROUND_COLOR: Color = Color::RGB(0, 0, 0);
 const WINDOW_SIZE: (u32, u32) = (800, 600);
+const WINDOW_HALF_SIZE: (u32, u32) = (WINDOW_SIZE.0 / 2, WINDOW_SIZE.1 / 2);
 const PADDLE_SIZE: (u32, u32) = (52, 150);
 const PADDLE_PADDING: u8 = 2;
 const PADDLE_SPEED: u8 = 4;
 const BALL_SIZE: (u32, u32) = (51, 51);
+const BALL_SPEED: u8 = 1;
 const SPRITESHEET_FILENAME: &str = "assets/spritesheet.png";
 
 struct Sprite<'a> {
@@ -23,27 +25,38 @@ struct Sprite<'a> {
 struct Entity<'a> {
     position: Point,
     size: (u32, u32),
+    collider_size: (u32, u32),
     sprite: Sprite<'a>
 }
 
 fn render(canvas: &mut WindowCanvas, background: Color, entities: &Vec<Entity>) -> Result<(), String> {
     canvas.set_draw_color(background);
     canvas.clear();
-    let window_size = canvas.output_size()?;
     for entity in entities {
-        render_entity(canvas, window_size, entity)?;
+        render_entity(canvas, entity)?;
     }
     canvas.present();
     Ok(())
 }
 
-fn render_entity(canvas: &mut WindowCanvas, window_size: (u32, u32), entity: &Entity) -> Result<(), String> {
+fn render_entity(canvas: &mut WindowCanvas, entity: &Entity) -> Result<(), String> {
     // Treat the center of the screen as the (0, 0) coordinate
-    let center_screen = Point::new(window_size.0 as i32 / 2, window_size.1 as i32 / 2);
+    let center_screen = Point::new(WINDOW_HALF_SIZE.0 as i32, WINDOW_HALF_SIZE.1 as i32);
     let position_in_screen = center_screen + entity.position;
     let rect = Rect::from_center(position_in_screen, entity.size.0, entity.size.1);
     canvas.copy(entity.sprite.texture, entity.sprite.rect, rect)?;
     Ok(())
+}
+
+fn move_paddle(paddle: &mut Entity, movement: i32) {
+    let position_y = paddle.position.y + movement;
+    let position = Point::new(paddle.position.x, position_y);
+    let collider_rect = Rect::from_center(position, paddle.size.0, paddle.size.1);
+    let window_top = -(WINDOW_HALF_SIZE.1 as i32);
+    let window_bottom = WINDOW_HALF_SIZE.1 as i32;
+    if collider_rect.top() >= window_top && collider_rect.bottom() <= window_bottom {
+        paddle.position.y = position_y;
+    }
 }
 
 fn main() -> Result<(), String> {
@@ -61,8 +74,9 @@ fn main() -> Result<(), String> {
     let fps = TARGET_FPS as u32;
     let mut entities: Vec<Entity> = Vec::new();
     entities.push(Entity {
-        position: Point::new(-(WINDOW_SIZE.0 as i32 / 2) + (PADDLE_SIZE.0 as i32 + PADDLE_PADDING as i32), 0),
+        position: Point::new(-(WINDOW_HALF_SIZE.0 as i32) + (PADDLE_SIZE.0 as i32 + PADDLE_PADDING as i32), 0),
         size: PADDLE_SIZE,
+        collider_size: PADDLE_SIZE,
         sprite: Sprite {
             texture: &texture,
             rect: Rect::new(0, 0, PADDLE_SIZE.0, PADDLE_SIZE.1)
@@ -70,8 +84,9 @@ fn main() -> Result<(), String> {
     });
     let paddle1_index = entities.len() - 1; 
     entities.push(Entity {
-        position: Point::new((WINDOW_SIZE.0 as i32 / 2) - (PADDLE_SIZE.0 as i32 + PADDLE_PADDING as i32), 0),
+        position: Point::new((WINDOW_HALF_SIZE.0 as i32) - (PADDLE_SIZE.0 as i32 + PADDLE_PADDING as i32), 0),
         size: PADDLE_SIZE,
+        collider_size: PADDLE_SIZE,
         sprite: Sprite {
             texture: &texture,
             rect: Rect::new(52, 0, PADDLE_SIZE.0, PADDLE_SIZE.1)
@@ -81,6 +96,7 @@ fn main() -> Result<(), String> {
     entities.push(Entity {
         position: Point::new(0, 0),
         size: BALL_SIZE,
+        collider_size: BALL_SIZE,
         sprite: Sprite {
             texture: &texture,
             rect: Rect::new(100, 0, BALL_SIZE.0, BALL_SIZE.1)
@@ -89,6 +105,7 @@ fn main() -> Result<(), String> {
     let ball_index = entities.len() - 1;
     let mut paddle1_movement: i32 = 0;
     let mut paddle2_movement: i32 = 0;
+    let mut ball_movement = Point::new(BALL_SPEED as i32, BALL_SPEED as i32);
     'running: loop {
         // Handle events
         for event in event_pump.poll_iter() {
@@ -121,8 +138,9 @@ fn main() -> Result<(), String> {
             }
         }
         // Update
-        entities[paddle1_index].position.y += paddle1_movement;
-        entities[paddle2_index].position.y += paddle2_movement;
+        move_paddle(&mut entities[paddle1_index], paddle1_movement);
+        move_paddle(&mut entities[paddle2_index], paddle2_movement);
+        entities[ball_index].position += ball_movement;
         // Render
         render(&mut canvas, BACKGROUND_COLOR, &entities)?;
         // Time management
