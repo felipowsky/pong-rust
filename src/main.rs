@@ -11,6 +11,7 @@ const BACKGROUND_COLOR: Color = Color::RGB(0, 0, 0);
 const WINDOW_SIZE: (u32, u32) = (800, 600);
 const PADDLE_SIZE: (u32, u32) = (52, 150);
 const PADDLE_PADDING: u8 = 2;
+const PADDLE_SPEED: u8 = 4;
 const BALL_SIZE: (u32, u32) = (51, 51);
 const SPRITESHEET_FILENAME: &str = "assets/spritesheet.png";
 
@@ -59,33 +60,35 @@ fn main() -> Result<(), String> {
     let mut event_pump = sdl_context.event_pump()?;
     let fps = TARGET_FPS as u32;
     let mut entities: Vec<Entity> = Vec::new();
-    let mut paddle1 = Entity {
+    entities.push(Entity {
         position: Point::new(-(WINDOW_SIZE.0 as i32 / 2) + (PADDLE_SIZE.0 as i32 + PADDLE_PADDING as i32), 0),
         size: PADDLE_SIZE,
         sprite: Sprite {
             texture: &texture,
             rect: Rect::new(0, 0, PADDLE_SIZE.0, PADDLE_SIZE.1)
         }
-    };
-    entities.push(paddle1);
-    let mut paddle2 = Entity {
+    });
+    let paddle1_index = entities.len() - 1; 
+    entities.push(Entity {
         position: Point::new((WINDOW_SIZE.0 as i32 / 2) - (PADDLE_SIZE.0 as i32 + PADDLE_PADDING as i32), 0),
         size: PADDLE_SIZE,
         sprite: Sprite {
             texture: &texture,
             rect: Rect::new(52, 0, PADDLE_SIZE.0, PADDLE_SIZE.1)
         }
-    };
-    entities.push(paddle2);
-    let mut ball = Entity {
+    });
+    let paddle2_index = entities.len() - 1;
+    entities.push(Entity {
         position: Point::new(0, 0),
         size: BALL_SIZE,
         sprite: Sprite {
             texture: &texture,
             rect: Rect::new(100, 0, BALL_SIZE.0, BALL_SIZE.1)
         }
-    };
-    entities.push(ball);
+    });
+    let ball_index = entities.len() - 1;
+    let mut paddle1_movement: i32 = 0;
+    let mut paddle2_movement: i32 = 0;
     'running: loop {
         // Handle events
         for event in event_pump.poll_iter() {
@@ -94,17 +97,32 @@ fn main() -> Result<(), String> {
                 Event::KeyDown { keycode: Some(Keycode::Escape), .. } => {
                     break 'running
                 },
+                Event::KeyDown { keycode: Some(Keycode::W), .. } => {
+                    paddle1_movement = -(PADDLE_SPEED as i32);
+                },
+                Event::KeyDown { keycode: Some(Keycode::S), .. } => {
+                    paddle1_movement = PADDLE_SPEED as i32;
+                },
+                Event::KeyUp { keycode: Some(Keycode::W), .. } |
+                Event::KeyUp { keycode: Some(Keycode::S), .. } => {
+                    paddle1_movement = 0;
+                },
                 Event::KeyDown { keycode: Some(Keycode::Up), .. } => {
+                    paddle2_movement = -(PADDLE_SPEED as i32);
                 },
                 Event::KeyDown { keycode: Some(Keycode::Down), .. } => {
+                    paddle2_movement = PADDLE_SPEED as i32;
                 },
-                Event::KeyDown { keycode: Some(Keycode::Right), .. } => {
-                },
-                Event::KeyDown { keycode: Some(Keycode::Left), .. } => {
+                Event::KeyUp { keycode: Some(Keycode::Up), .. } |
+                Event::KeyUp { keycode: Some(Keycode::Down), .. } => {
+                    paddle2_movement = 0;
                 },
                 _ => {}
             }
         }
+        // Update
+        entities[paddle1_index].position.y += paddle1_movement;
+        entities[paddle2_index].position.y += paddle2_movement;
         // Render
         render(&mut canvas, BACKGROUND_COLOR, &entities)?;
         // Time management
