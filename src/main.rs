@@ -3,7 +3,8 @@ use sdl2::keyboard::Keycode;
 use sdl2::pixels::Color;
 use sdl2::render::{WindowCanvas, Texture};
 use sdl2::rect::{Point, Rect};
-use sdl2::image::{self, LoadTexture, InitFlag};
+use sdl2::image::{self, LoadTexture};
+use sdl2::mixer::{self, DEFAULT_CHANNELS, AUDIO_S16LSB};
 use std::time::Duration;
 use std::cmp::{max, min};
 
@@ -19,6 +20,8 @@ const BALL_RADIUS: u32 = 11;
 const BALL_SPEED: u8 = 2;
 const BALL_MAX_SPEED: u8 = 15;
 const SPRITESHEET_FILENAME: &str = "assets/spritesheet.png";
+const POP_SOUND_FILENAME: &str = "assets/pop.ogg";
+const SCORE_SOUND_FILENAME: &str = "assets/score.ogg";
 
 struct Sprite<'a> {
     texture: &'a Texture<'a>,
@@ -31,9 +34,14 @@ struct Entity<'a> {
     sprite: Sprite<'a>
 }
 
-enum BallState {
-    Collided,
-    Scored,
+enum BallUpdateState {
+    PaddleCollision,
+    Scoring,
+    Moving
+}
+
+enum BallMoveState {
+    WallCollision,
     Moving
 }
 
@@ -67,44 +75,57 @@ fn move_paddle(paddle: &mut Entity, movement: i32) {
     }
 }
 
-fn move_ball(ball: &mut Entity, movement: &mut Point) {
+fn move_ball(ball: &mut Entity, movement: &mut Point) -> BallMoveState {
     let position = ball.position + *movement;
     let window_top = -(WINDOW_HALF_SIZE.1 as i32);
     let window_bottom = WINDOW_HALF_SIZE.1 as i32;
+    let mut result = BallMoveState::Moving;
     if position.y - (BALL_RADIUS as i32) < window_top || position.y + (BALL_RADIUS as i32) > window_bottom {
         movement.y = -movement.y;
+        result = BallMoveState::WallCollision;
     }
     ball.position += *movement;
+    result
 }
 
-fn update_ball_state(ball: &Entity, ball_movement: Point, paddle: &Entity) -> BallState {
+fn update_ball_state(ball: &Entity, ball_movement: Point, paddle: &Entity) -> BallUpdateState {
     if ball_movement.x == 0 {
-        return BallState::Moving
+        return BallUpdateState::Moving
     }
     let paddle_collider_rect = Rect::from_center(paddle.position, PADDLE_COLLIDER_SIZE.0, PADDLE_COLLIDER_SIZE.1);
     if ball_movement.x > 0 {
         if ball.position.x + (BALL_RADIUS as i32) > paddle_collider_rect.left() {
             if ball.position.y >= paddle_collider_rect.top_left().y && ball.position.y <= paddle_collider_rect.bottom_left().y {
-                return BallState::Collided;
+                return BallUpdateState::PaddleCollision;
             } else {
-                return BallState::Scored;
+                return BallUpdateState::Scoring;
             }
         }
     } else {
         if ball.position.x - (BALL_RADIUS as i32) < paddle_collider_rect.right() {
             if ball.position.y >= paddle_collider_rect.top_right().y && ball.position.y <= paddle_collider_rect.bottom_right().y {
-                return BallState::Collided;
+                return BallUpdateState::PaddleCollision;
             } else {
-                return BallState::Scored;
+                return BallUpdateState::Scoring;
             }
         }
     }
-    return BallState::Moving
+    return BallUpdateState::Moving
 }
 
 fn main() -> Result<(), String> {
     let sdl_context = sdl2::init()?;
-    let _sdl_image_context = image::init(InitFlag::PNG | InitFlag::JPG)?;
+    let _sdl_image_context = image::init(image::InitFlag::PNG)?;
+    let _sdl_audio = sdl_context.audio()?;
+    let frequency = 44_100;
+    let format = AUDIO_S16LSB;
+    let channels = DEFAULT_CHANNELS;
+    let chunk_size = 1_024;
+    sdl2::mixer::open_audio(frequency, format, channels, chunk_size)?;
+    let _sdl_mixer_context = mixer::init(mixer::InitFlag::OGG)?;
+    sdl2::mixer::allocate_channels(4);
+    let pop_sound = sdl2::mixer::Music::from_file(POP_SOUND_FILENAME)?;
+    let score_sound = sdl2::mixer::Music::from_file(SCORE_SOUND_FILENAME)?;
     let video_subsystem = sdl_context.video()?;
     let window = video_subsystem.window("Pong", WINDOW_SIZE.0, WINDOW_SIZE.1)
         .position_centered()
@@ -179,26 +200,31 @@ fn main() -> Result<(), String> {
             }
         }
         // Update
-        move_ball(&mut entities[ball_index], &mut ball_movement);
+        match move_ball(&mut entities[ball_index], &mut ball_movement) {
+            BallMoveState::WallCollision => { pop_sound.play(1)?; },
+            BallMoveState::Moving => (),
+        }
         move_paddle(&mut entities[paddle1_index], paddle1_movement);
         move_paddle(&mut entities[paddle2_index], paddle2_movement);
         let paddle_index_collision = if ball_movement.x > 0 { paddle2_index } else { paddle1_index };
         match update_ball_state(&entities[ball_index], ball_movement, &entities[paddle_index_collision]) {
-            BallState::Scored => {
+            BallUpdateState::Scoring => {
                 if ball_movement.x > 0 {
                     score.0 += 1
                 } else {
                     score.1 += 1
                 }
+                score_sound.play(1)?;
                 ball_movement = Point::new(BALL_SPEED as i32, BALL_SPEED as i32);
                 entities[ball_index].position = Point::new(0, 0);
             },
-            BallState::Collided => {
+            BallUpdateState::PaddleCollision => {
                 ball_movement.x = -ball_movement.x;
                 ball_movement.x += if ball_movement.x > 0 { 1 } else { -1 };
                 ball_movement.x = if ball_movement.x > 0 { min(ball_movement.x, BALL_MAX_SPEED as i32) } else { max(ball_movement.x, -(BALL_MAX_SPEED as i32)) };
+                pop_sound.play(1)?;
             },
-            BallState::Moving => (),
+            BallUpdateState::Moving => (),
         }
         // Render
         render(&mut canvas, BACKGROUND_COLOR, &entities)?;
