@@ -47,16 +47,75 @@ enum BallMoveState {
     Moving
 }
 
-fn render<T>(canvas: &mut WindowCanvas, background: Color, texture_creator: &TextureCreator<T>, font: &Font, entities: &Vec<Entity>, score: (u64, u64)) -> Result<(), String> {
+struct Label<'ttf_module, 'rwops, 'font: 'ttf_module + 'rwops, 'tc, T> {
+    text: String,
+    font: &'font Font<'ttf_module, 'rwops>,
+    position: Point,
+    color: Color,
+    width: u32,
+    height: u32,
+    texture_creator: &'tc TextureCreator<T>,
+    cached_texture: Option<Texture<'tc>>
+}
+
+impl<'ttf_module, 'rwops, 'font, 'tc, T> Label<'ttf_module, 'rwops, 'font, 'tc, T> {
+    fn new(text: String, font: &'font Font<'ttf_module, 'rwops>, position: Point, color: Color, texture_creator: &'tc TextureCreator<T>) -> Result<Self, String> {
+        let mut label = Label {
+            text: text,
+            font: &font,
+            position: position,
+            color: color,
+            width: 0,
+            height: 0,
+            texture_creator: texture_creator,
+            cached_texture: None
+        };
+        label.create_cache()?;
+        Ok(label)
+    }
+
+    fn set_text(&mut self, text: String) {
+        self.text = text;
+        self.clear_cache();
+    }
+
+    fn clear_cache(&mut self) {
+        self.cached_texture = None
+    }
+
+    fn texture(&mut self) -> Result<&Texture<'tc>, String> {
+        match self.cached_texture {
+            Some(ref texture) => Ok(&texture),
+            None => Ok(self.create_cache()?)
+        }
+    }
+
+    fn create_texture(&self, text: &str, font: &Font, color: &Color, texture_creator: &'tc TextureCreator<T>) -> Result<Texture<'tc>, String> {
+        let surface = font.render(text)
+            .blended(*color).map_err(|e| e.to_string())?;
+        let texture = texture_creator.create_texture_from_surface(&surface)
+            .map_err(|e| e.to_string())?;
+        Ok(texture)
+    }
+
+    fn create_cache(&mut self) -> Result<&Texture<'tc>, String> {
+        let texture = self.create_texture(&self.text, &self.font, &self.color, &self.texture_creator)?;
+        let TextureQuery { width, height, .. } = texture.query();
+        self.width = width;
+        self.height = height;
+        self.cached_texture = Some(texture);
+        Ok(self.cached_texture.as_ref().unwrap())
+    }
+}
+
+fn render<T>(canvas: &mut WindowCanvas, background: Color, entities: &Vec<Entity>, paddle1_score_label: &mut Label<T>, paddle2_score_label: &mut Label<T>) -> Result<(), String> {
     canvas.set_draw_color(background);
     canvas.clear();
     for entity in entities {
         render_entity(canvas, entity)?;
     }
-    let score_position = Point::new(-(WINDOW_HALF_SIZE.0 as i32) / 2, -(WINDOW_HALF_SIZE.1 as i32) + 60);
-    render_text(canvas, &texture_creator, &font, &format!("{}", score.0), Color::RED, score_position)?;
-    let score_position = Point::new(WINDOW_HALF_SIZE.0 as i32 / 2, -(WINDOW_HALF_SIZE.1 as i32) + 60);
-    render_text(canvas, &texture_creator, &font, &format!("{}", score.1), Color::BLUE, score_position)?;
+    render_label(canvas, paddle1_score_label)?;
+    render_label(canvas, paddle2_score_label)?;
     canvas.present();
     Ok(())
 }
@@ -69,16 +128,12 @@ fn render_entity(canvas: &mut WindowCanvas, entity: &Entity) -> Result<(), Strin
     Ok(())
 }
 
-fn render_text<T>(canvas: &mut WindowCanvas, texture_creator: &TextureCreator<T>, font: &Font, text: &str, color: Color, position: Point) -> Result<(), String> {
-    let surface = font.render(text)
-        .blended(color).map_err(|e| e.to_string())?;
-    let texture = texture_creator.create_texture_from_surface(&surface)
-        .map_err(|e| e.to_string())?;
-    let TextureQuery { width, height, .. } = texture.query();
+fn render_label<T>(canvas: &mut WindowCanvas, label: &mut Label<T>) -> Result<(), String> {
     let center_screen = Point::new(WINDOW_HALF_SIZE.0 as i32, WINDOW_HALF_SIZE.1 as i32);
-    let position_in_screen = center_screen + position;
-    let rect = Rect::from_center(position_in_screen, width, height);
-    canvas.copy(&texture, None, rect)?;
+    let position_in_screen = center_screen + label.position;
+    let rect = Rect::from_center(position_in_screen, label.width, label.height);
+    let texture = label.texture()?;
+    canvas.copy(texture, None, rect)?;
     Ok(())
 }
 
@@ -182,7 +237,22 @@ fn main() -> Result<(), String> {
         }
     });
     let ball_index = entities.len() - 1;
-    let mut score: (u64, u64) = (0, 0);
+    let mut paddle1_score: u64 = 0;
+    let mut paddle1_score_label = Label::new(
+        format!("{}", 0), 
+        &font, 
+        Point::new(-(WINDOW_HALF_SIZE.0 as i32) / 2, -(WINDOW_HALF_SIZE.1 as i32) + 60), 
+        Color::RED, 
+        &texture_creator
+    )?;
+    let mut paddle2_score: u64 = 0;
+    let mut paddle2_score_label = Label::new(
+        format!("{}", 0), 
+        &font, 
+        Point::new(WINDOW_HALF_SIZE.0 as i32 / 2, -(WINDOW_HALF_SIZE.1 as i32) + 60), 
+        Color::BLUE, 
+        &texture_creator
+    )?;
     let mut paddle1_movement: i32 = 0;
     let mut paddle2_movement: i32 = 0;
     let mut ball_movement = Point::new(BALL_SPEED as i32, BALL_SPEED as i32);
@@ -229,10 +299,12 @@ fn main() -> Result<(), String> {
             BallUpdateState::Scoring => {
                 let x_movement: i32;
                 if ball_movement.x > 0 {
-                    score.0 += 1;
+                    paddle1_score += 1;
+                    paddle1_score_label.set_text(format!("{}", paddle1_score));
                     x_movement = -(BALL_SPEED as i32);
                 } else {
-                    score.1 += 1;
+                    paddle2_score += 1;
+                    paddle2_score_label.set_text(format!("{}", paddle2_score));
                     x_movement = BALL_SPEED as i32;
                 }
                 score_sound.play(1)?;
@@ -248,7 +320,7 @@ fn main() -> Result<(), String> {
             BallUpdateState::Moving => (),
         }
         // Render
-        render(&mut canvas, BACKGROUND_COLOR, &texture_creator, &font, &entities, score)?;
+        render(&mut canvas, BACKGROUND_COLOR, &entities, &mut paddle1_score_label, &mut paddle2_score_label)?;
         // Time management
         ::std::thread::sleep(Duration::new(0, 1_000_000_000u32 / fps));
     }
