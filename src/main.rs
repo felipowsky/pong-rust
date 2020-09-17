@@ -5,8 +5,8 @@ use sdl2::render::{WindowCanvas, Texture, TextureCreator, TextureQuery};
 use sdl2::rect::{Point, Rect};
 use sdl2::image::{self, LoadTexture};
 use sdl2::mixer::{self, DEFAULT_CHANNELS, AUDIO_S16LSB, Music};
-use sdl2::ttf::{self, Font};
-use sdl2::EventPump;
+use sdl2::ttf::{self, Sdl2TtfContext, Font};
+use sdl2::{Sdl, EventPump};
 use std::time::Duration;
 use std::cmp::{max, min};
 
@@ -127,100 +127,20 @@ impl<'ttf_module, 'rwops, 'tc, T> Label<'ttf_module, 'rwops, 'tc, T> {
     }
 }
 
-fn render<T>(canvas: &mut WindowCanvas, 
-    background: Color, 
-    entities: &Vec<Entity>, 
-    paddle1_score_label: &mut Label<T>, 
-    paddle2_score_label: &mut Label<T>) -> Result<(), String> {
-    canvas.set_draw_color(background);
-    canvas.clear();
-    for entity in entities {
-        render_entity(canvas, entity)?;
-    }
-    render_label(canvas, paddle1_score_label)?;
-    render_label(canvas, paddle2_score_label)?;
-    canvas.present();
-    Ok(())
-}
-
-fn render_entity(canvas: &mut WindowCanvas, entity: &Entity) -> Result<(), String> {
-    let center_screen = Point::new(WINDOW_HALF_SIZE.0 as i32, WINDOW_HALF_SIZE.1 as i32);
-    let position_in_screen = center_screen + entity.position;
-    let rect = Rect::from_center(position_in_screen, entity.size.0, entity.size.1);
-    canvas.copy(entity.sprite.texture, entity.sprite.rect, rect)?;
-    Ok(())
-}
-
-fn render_label<T>(canvas: &mut WindowCanvas, label: &mut Label<T>) -> Result<(), String> {
-    let center_screen = Point::new(WINDOW_HALF_SIZE.0 as i32, WINDOW_HALF_SIZE.1 as i32);
-    let position_in_screen = center_screen + label.position;
-    let rect = Rect::from_center(position_in_screen, label.width, label.height);
-    let texture = label.texture()?;
-    canvas.copy(texture, None, rect)?;
-    Ok(())
-}
-
-fn move_paddle(paddle: &mut Entity, movement: i32) {
-    let position_y = paddle.position.y + movement;
-    let position = Point::new(paddle.position.x, position_y);
-    let collider_rect = Rect::from_center(
-        position, 
-        PADDLE_COLLIDER_SIZE.0, 
-        PADDLE_COLLIDER_SIZE.1
-    );
-    let window_top = -(WINDOW_HALF_SIZE.1 as i32);
-    let window_bottom = WINDOW_HALF_SIZE.1 as i32;
-    if collider_rect.top() >= window_top && 
-        collider_rect.bottom() <= window_bottom {
-        paddle.position.y = position_y;
-    }
-}
-
-fn move_ball(ball: &mut Entity, movement: &mut Point) -> BallMoveState {
-    let position = ball.position + *movement;
-    let window_top = -(WINDOW_HALF_SIZE.1 as i32);
-    let window_bottom = WINDOW_HALF_SIZE.1 as i32;
-    let result: BallMoveState;
-    if position.y - (BALL_RADIUS as i32) < window_top || 
-        position.y + (BALL_RADIUS as i32) > window_bottom {
-        movement.y = -movement.y;
-        result = BallMoveState::WallCollision;
-    } else {
-        result = BallMoveState::Moving;
-    }
-    ball.position += *movement;
-    result
-}
-
-fn update_ball_state(ball: &Entity, ball_movement: Point, paddle: &Entity) -> BallUpdateState {
-    if ball_movement.x == 0 {
-        return BallUpdateState::Moving
-    }
-    let paddle_collider_rect = Rect::from_center(
-        paddle.position, 
-        PADDLE_COLLIDER_SIZE.0, 
-        PADDLE_COLLIDER_SIZE.1
-    );
-    if ball_movement.x > 0 {
-        if ball.position.x + (BALL_RADIUS as i32) > paddle_collider_rect.left() {
-            if ball.position.y >= paddle_collider_rect.top_left().y && 
-                ball.position.y <= paddle_collider_rect.bottom_left().y {
-                return BallUpdateState::PaddleCollision;
-            } else {
-                return BallUpdateState::Scoring;
-            }
-        }
-    } else {
-        if ball.position.x - (BALL_RADIUS as i32) < paddle_collider_rect.right() {
-            if ball.position.y >= paddle_collider_rect.top_right().y && 
-                ball.position.y <= paddle_collider_rect.bottom_right().y {
-                return BallUpdateState::PaddleCollision;
-            } else {
-                return BallUpdateState::Scoring;
-            }
-        }
-    }
-    return BallUpdateState::Moving
+fn init() -> Result<(Sdl, Sdl2TtfContext), String> {
+    let sdl_context = sdl2::init()
+        .expect("Could not initialize SDL");
+    let _sdl_image_context = image::init(image::InitFlag::PNG)
+        .expect("Could not initialize SDL_image");
+    let sdl_ttf_context = ttf::init()
+        .expect("Could not initialize SDL_ttf");
+    mixer::open_audio(44_100, AUDIO_S16LSB, DEFAULT_CHANNELS, 1_024)
+        .expect("Could not open SDL_mixer");
+    let _sdl_mixer_context = mixer::init(mixer::InitFlag::OGG)
+        .expect("Could not initialize SDL_mixer");
+    mixer::allocate_channels(4);
+    mixer::Music::set_volume(32);
+    Ok((sdl_context, sdl_ttf_context))
 }
 
 fn handle_events(event_pump: &mut EventPump, 
@@ -319,22 +239,107 @@ fn update<'a, 'b, 'c, 'd, T>(entities: &mut Vec<Entity>,
     Ok(())
 }
 
+fn move_paddle(paddle: &mut Entity, movement: i32) {
+    let position_y = paddle.position.y + movement;
+    let position = Point::new(paddle.position.x, position_y);
+    let collider_rect = Rect::from_center(
+        position, 
+        PADDLE_COLLIDER_SIZE.0, 
+        PADDLE_COLLIDER_SIZE.1
+    );
+    let window_top = -(WINDOW_HALF_SIZE.1 as i32);
+    let window_bottom = WINDOW_HALF_SIZE.1 as i32;
+    if collider_rect.top() >= window_top && 
+        collider_rect.bottom() <= window_bottom {
+        paddle.position.y = position_y;
+    }
+}
+
+fn move_ball(ball: &mut Entity, movement: &mut Point) -> BallMoveState {
+    let position = ball.position + *movement;
+    let window_top = -(WINDOW_HALF_SIZE.1 as i32);
+    let window_bottom = WINDOW_HALF_SIZE.1 as i32;
+    let result: BallMoveState;
+    if position.y - (BALL_RADIUS as i32) < window_top || 
+        position.y + (BALL_RADIUS as i32) > window_bottom {
+        movement.y = -movement.y;
+        result = BallMoveState::WallCollision;
+    } else {
+        result = BallMoveState::Moving;
+    }
+    ball.position += *movement;
+    result
+}
+
+fn update_ball_state(ball: &Entity, ball_movement: Point, paddle: &Entity) -> BallUpdateState {
+    if ball_movement.x == 0 {
+        return BallUpdateState::Moving
+    }
+    let paddle_collider_rect = Rect::from_center(
+        paddle.position, 
+        PADDLE_COLLIDER_SIZE.0, 
+        PADDLE_COLLIDER_SIZE.1
+    );
+    if ball_movement.x > 0 {
+        if ball.position.x + (BALL_RADIUS as i32) > paddle_collider_rect.left() {
+            if ball.position.y >= paddle_collider_rect.top_left().y && 
+                ball.position.y <= paddle_collider_rect.bottom_left().y {
+                return BallUpdateState::PaddleCollision;
+            } else {
+                return BallUpdateState::Scoring;
+            }
+        }
+    } else {
+        if ball.position.x - (BALL_RADIUS as i32) < paddle_collider_rect.right() {
+            if ball.position.y >= paddle_collider_rect.top_right().y && 
+                ball.position.y <= paddle_collider_rect.bottom_right().y {
+                return BallUpdateState::PaddleCollision;
+            } else {
+                return BallUpdateState::Scoring;
+            }
+        }
+    }
+    return BallUpdateState::Moving
+}
+
+fn render<T>(canvas: &mut WindowCanvas, 
+    background: Color, 
+    entities: &Vec<Entity>, 
+    paddle1_score_label: &mut Label<T>, 
+    paddle2_score_label: &mut Label<T>) -> Result<(), String> {
+    canvas.set_draw_color(background);
+    canvas.clear();
+    for entity in entities {
+        render_entity(canvas, entity)?;
+    }
+    render_label(canvas, paddle1_score_label)?;
+    render_label(canvas, paddle2_score_label)?;
+    canvas.present();
+    Ok(())
+}
+
+fn render_entity(canvas: &mut WindowCanvas, entity: &Entity) -> Result<(), String> {
+    let center_screen = Point::new(WINDOW_HALF_SIZE.0 as i32, WINDOW_HALF_SIZE.1 as i32);
+    let position_in_screen = center_screen + entity.position;
+    let rect = Rect::from_center(position_in_screen, entity.size.0, entity.size.1);
+    canvas.copy(entity.sprite.texture, entity.sprite.rect, rect)?;
+    Ok(())
+}
+
+fn render_label<T>(canvas: &mut WindowCanvas, label: &mut Label<T>) -> Result<(), String> {
+    let center_screen = Point::new(WINDOW_HALF_SIZE.0 as i32, WINDOW_HALF_SIZE.1 as i32);
+    let position_in_screen = center_screen + label.position;
+    let rect = Rect::from_center(position_in_screen, label.width, label.height);
+    let texture = label.texture()?;
+    canvas.copy(texture, None, rect)?;
+    Ok(())
+}
+
 fn main() -> Result<(), String> {
-    let sdl_context = sdl2::init()
-        .expect("Could not initialize SDL");
-    let _sdl_image_context = image::init(image::InitFlag::PNG)
-        .expect("Could not initialize SDL_image");
-    let sdl_ttf_context = ttf::init()
-        .expect("Could not initialize SDL_ttf");
+    let (sdl_context, ttf_context) = init()?;
     let _sdl_audio = sdl_context.audio()
         .expect("Could not initialize SDL audio");
-    mixer::open_audio(44_100, AUDIO_S16LSB, DEFAULT_CHANNELS, 1_024)
-        .expect("Could not open SDL_mixer");
-    let _sdl_mixer_context = mixer::init(mixer::InitFlag::OGG)
-        .expect("Could not initialize SDL_mixer");
-    mixer::allocate_channels(4);
-    mixer::Music::set_volume(32);
-    let font = sdl_ttf_context.load_font(FONT_FILENAME, 60)
+    let font = ttf_context.load_font(FONT_FILENAME, 60)
         .expect(&format!("Could not load font: {}", FONT_FILENAME));
     let pop_sound = mixer::Music::from_file(POP_SOUND_FILENAME)
         .expect(&format!("Could not load audio: {}", POP_SOUND_FILENAME));
@@ -346,7 +351,9 @@ fn main() -> Result<(), String> {
         .position_centered()
         .build()
         .expect("Could not initialize window");
-    let mut canvas = window.into_canvas().build().expect("Could not create a canvas");
+    let mut canvas = window.into_canvas()
+        .build()
+        .expect("Could not create a canvas");
     let texture_creator = canvas.texture_creator();
     let texture = texture_creator.load_texture(SPRITESHEET_FILENAME)
         .expect(&format!("Could not load image: {}", SPRITESHEET_FILENAME));
