@@ -53,9 +53,9 @@ struct Entity<'a> {
     sprite: Sprite<'a>
 }
 
-struct Label<'ttf_module, 'rwops, 'font: 'ttf_module + 'rwops, 'tc, T> {
+struct Label<'ttf_module, 'rwops, 'tc, T> {
     text: String,
-    font: &'font Font<'ttf_module, 'rwops>,
+    font: &'ttf_module Font<'ttf_module, 'rwops>,
     position: Point,
     color: Color,
     width: u32,
@@ -64,9 +64,9 @@ struct Label<'ttf_module, 'rwops, 'font: 'ttf_module + 'rwops, 'tc, T> {
     cached_texture: Option<Texture<'tc>>
 }
 
-impl<'ttf_module, 'rwops, 'font, 'tc, T> Label<'ttf_module, 'rwops, 'font, 'tc, T> {
+impl<'ttf_module, 'rwops, 'tc, T> Label<'ttf_module, 'rwops, 'tc, T> {
     fn new(text: String, 
-        font: &'font Font<'ttf_module, 'rwops>, 
+        font: &'ttf_module Font<'ttf_module, 'rwops>, 
         position: Point, 
         color: Color, 
         texture_creator: &'tc TextureCreator<T>) -> Result<Self, String> {
@@ -264,11 +264,11 @@ fn update<'a, 'b, 'c, 'd, T>(entities: &mut Vec<Entity>,
     paddle1_index: usize,
     paddle1_movement: i32,
     paddle1_score: &mut u64,
-    paddle1_score_label: &mut Label<'a, 'b, 'c, 'd, T>,
+    paddle1_score_label: &mut Label<'a, 'b, 'c, T>,
     paddle2_index: usize,
     paddle2_movement: i32,
     paddle2_score: &mut u64,
-    paddle2_score_label: &mut Label<'a, 'b, 'c, 'd, T>,
+    paddle2_score_label: &mut Label<'a, 'b, 'c, T>,
     pop_sound: &Music,
     score_sound: &Music) -> Result<(), String> {
     match move_ball(&mut entities[ball_index], ball_movement) {
@@ -328,16 +328,17 @@ fn main() -> Result<(), String> {
         .expect("Could not initialize SDL_ttf");
     let _sdl_audio = sdl_context.audio()
         .expect("Could not initialize SDL audio");
-    sdl2::mixer::open_audio(44_100, AUDIO_S16LSB, DEFAULT_CHANNELS, 1_024)
+    mixer::open_audio(44_100, AUDIO_S16LSB, DEFAULT_CHANNELS, 1_024)
         .expect("Could not open SDL_mixer");
     let _sdl_mixer_context = mixer::init(mixer::InitFlag::OGG)
         .expect("Could not initialize SDL_mixer");
-    sdl2::mixer::allocate_channels(4);
+    mixer::allocate_channels(4);
+    mixer::Music::set_volume(32);
     let font = sdl_ttf_context.load_font(FONT_FILENAME, 60)
         .expect(&format!("Could not load font: {}", FONT_FILENAME));
-    let pop_sound = sdl2::mixer::Music::from_file(POP_SOUND_FILENAME)
+    let pop_sound = mixer::Music::from_file(POP_SOUND_FILENAME)
         .expect(&format!("Could not load audio: {}", POP_SOUND_FILENAME));
-    let score_sound = sdl2::mixer::Music::from_file(SCORE_SOUND_FILENAME)
+    let score_sound = mixer::Music::from_file(SCORE_SOUND_FILENAME)
         .expect(&format!("Could not load audio: {}", SCORE_SOUND_FILENAME));
     let video_subsystem = sdl_context.video()
         .expect("Could not initialize video system");
