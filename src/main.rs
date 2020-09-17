@@ -1,14 +1,19 @@
+mod gui;
+mod data;
+
 use sdl2::event::{Event};
 use sdl2::keyboard::Keycode;
 use sdl2::pixels::Color;
-use sdl2::render::{WindowCanvas, Texture, TextureCreator, TextureQuery};
+use sdl2::render::WindowCanvas;
 use sdl2::rect::{Point, Rect};
 use sdl2::image::{self, LoadTexture};
 use sdl2::mixer::{self, DEFAULT_CHANNELS, AUDIO_S16LSB, Music};
-use sdl2::ttf::{self, Sdl2TtfContext, Font};
+use sdl2::ttf::{self, Sdl2TtfContext};
 use sdl2::{Sdl, EventPump};
 use std::time::Duration;
 use std::cmp::{max, min};
+use gui::Label;
+use data::{Entity, Sprite, Paddle, Ball};
 
 const TARGET_FPS: u8 = 60;
 const BACKGROUND_COLOR: Color = Color::RGB(0, 0, 0);
@@ -40,110 +45,6 @@ enum BallMoveState {
 enum HandleEventsState {
     Exit,
     Running
-}
-
-struct Sprite<'a> {
-    texture: &'a Texture<'a>,
-    rect: Rect
-}
-
-struct Entity<'a> {
-    position: Point,
-    size: (u32, u32),
-    sprite: Sprite<'a>
-}
-
-struct PaddleData<'a, 'b, 'c, T> {
-    index: usize,
-    movement: i32,
-    score: u64,
-    label: Label<'a, 'b, 'c, T>
-}
-
-impl<'a, 'b, 'c, T> PaddleData<'a, 'b, 'c, T> {
-    fn increase_score(&mut self) {
-        self.score += 1;
-        self.label.set_text(format!("{}", self.score));
-    }
-}
-
-struct BallData {
-    index: usize, 
-    movement: Point,
-}
-
-struct Label<'ttf_module, 'rwops, 'tc, T> {
-    text: String,
-    font: &'ttf_module Font<'ttf_module, 'rwops>,
-    position: Point,
-    color: Color,
-    width: u32,
-    height: u32,
-    texture_creator: &'tc TextureCreator<T>,
-    cached_texture: Option<Texture<'tc>>
-}
-
-impl<'ttf_module, 'rwops, 'tc, T> Label<'ttf_module, 'rwops, 'tc, T> {
-    fn new(text: String, 
-        font: &'ttf_module Font<'ttf_module, 'rwops>, 
-        position: Point, 
-        color: Color, 
-        texture_creator: &'tc TextureCreator<T>) -> Result<Self, String> {
-        let mut label = Label {
-            text: text,
-            font: &font,
-            position: position,
-            color: color,
-            width: 0,
-            height: 0,
-            texture_creator: texture_creator,
-            cached_texture: None
-        };
-        label.create_cache()?;
-        Ok(label)
-    }
-
-    fn set_text(&mut self, text: String) {
-        self.text = text;
-        self.clear_cache();
-    }
-
-    fn clear_cache(&mut self) {
-        self.cached_texture = None
-    }
-
-    fn texture(&mut self) -> Result<&Texture<'tc>, String> {
-        match self.cached_texture {
-            Some(ref texture) => Ok(&texture),
-            None => Ok(self.create_cache()?)
-        }
-    }
-
-    fn create_texture(&self, 
-        text: &str, 
-        font: &Font, 
-        color: &Color, 
-        texture_creator: &'tc TextureCreator<T>) -> Result<Texture<'tc>, String> {
-        let surface = font.render(text)
-            .blended(*color).map_err(|e| e.to_string())?;
-        let texture = texture_creator.create_texture_from_surface(&surface)
-            .map_err(|e| e.to_string())?;
-        Ok(texture)
-    }
-
-    fn create_cache(&mut self) -> Result<&Texture<'tc>, String> {
-        let texture = self.create_texture(
-            &self.text, 
-            &self.font, 
-            &self.color, 
-            &self.texture_creator
-        )?;
-        let TextureQuery { width, height, .. } = texture.query();
-        self.width = width;
-        self.height = height;
-        self.cached_texture = Some(texture);
-        Ok(self.cached_texture.as_ref().unwrap())
-    }
 }
 
 fn init() -> Result<(Sdl, Sdl2TtfContext), String> {
@@ -198,28 +99,28 @@ fn handle_events(event_pump: &mut EventPump,
 }
 
 fn update<'a, 'b, 'c, T>(entities: &mut Vec<Entity>, 
-    ball: &mut BallData, 
-    paddle1: &mut PaddleData<'a, 'b, 'c, T>,
-    paddle2: &mut PaddleData<'a, 'b, 'c, T>,
+    ball: &mut Ball, 
+    paddle1: &mut Paddle<'a, 'b, 'c, T>,
+    paddle2: &mut Paddle<'a, 'b, 'c, T>,
     pop_sound: &Music,
     score_sound: &Music) -> Result<(), String> {
-    match move_ball(&mut entities[ball.index], &mut ball.movement) {
+    match move_ball(&mut entities[ball.entity_index()], &mut ball.movement) {
         BallMoveState::WallCollision => { pop_sound.play(1)?; },
         BallMoveState::Moving => (),
     }
-    move_paddle(&mut entities[paddle1.index], paddle1.movement);
-    move_paddle(&mut entities[paddle2.index], paddle2.movement);
+    move_paddle(&mut entities[paddle1.entity_index()], paddle1.movement);
+    move_paddle(&mut entities[paddle2.entity_index()], paddle2.movement);
     let paddle_index_collision = if ball.movement.x > 0 {
-        paddle2.index 
+        paddle2.entity_index() 
     } else { 
-        paddle1.index 
+        paddle1.entity_index()
     };
-    match update_ball_state(&entities[ball.index], 
+    match update_ball_state(&entities[ball.entity_index()], 
         ball.movement, 
         &entities[paddle_index_collision]) {
         BallUpdateState::Scoring => {
             let x_movement: i32;
-            let paddle: &mut PaddleData<'a, 'b, 'c, T>;
+            let paddle: &mut Paddle<'a, 'b, 'c, T>;
             if ball.movement.x > 0 {
                 x_movement = -(BALL_SPEED as i32);
                 paddle = paddle1;
@@ -230,7 +131,7 @@ fn update<'a, 'b, 'c, T>(entities: &mut Vec<Entity>,
             paddle.increase_score();
             score_sound.play(1)?;
             ball.movement = Point::new(x_movement, BALL_SPEED as i32);
-            entities[ball.index].position = Point::new(0, 0);
+            entities[ball.entity_index()].position = Point::new(0, 0);
         },
         BallUpdateState::PaddleCollision => {
             ball.movement.x = -ball.movement.x;
@@ -292,18 +193,18 @@ fn update_ball_state(ball: &Entity, ball_movement: Point, paddle: &Entity) -> Ba
         if ball.position.x + (BALL_RADIUS as i32) > paddle_collider_rect.left() {
             if ball.position.y >= paddle_collider_rect.top_left().y && 
                 ball.position.y <= paddle_collider_rect.bottom_left().y {
-                return BallUpdateState::PaddleCollision;
+                return BallUpdateState::PaddleCollision
             } else {
-                return BallUpdateState::Scoring;
+                return BallUpdateState::Scoring
             }
         }
     } else {
         if ball.position.x - (BALL_RADIUS as i32) < paddle_collider_rect.right() {
             if ball.position.y >= paddle_collider_rect.top_right().y && 
                 ball.position.y <= paddle_collider_rect.bottom_right().y {
-                return BallUpdateState::PaddleCollision;
+                return BallUpdateState::PaddleCollision
             } else {
-                return BallUpdateState::Scoring;
+                return BallUpdateState::Scoring
             }
         }
     }
@@ -337,7 +238,7 @@ fn render_entity(canvas: &mut WindowCanvas, entity: &Entity) -> Result<(), Strin
 fn render_label<T>(canvas: &mut WindowCanvas, label: &mut Label<T>) -> Result<(), String> {
     let center_screen = Point::new(WINDOW_HALF_SIZE.0 as i32, WINDOW_HALF_SIZE.1 as i32);
     let position_in_screen = center_screen + label.position;
-    let rect = Rect::from_center(position_in_screen, label.width, label.height);
+    let rect = Rect::from_center(position_in_screen, label.width()?, label.height()?);
     let texture = label.texture()?;
     canvas.copy(texture, None, rect)?;
     Ok(())
@@ -378,11 +279,11 @@ fn main() -> Result<(), String> {
             rect: Rect::new(0, 0, PADDLE_SIZE.0, PADDLE_SIZE.1)
         }
     });
-    let mut paddle1 = PaddleData {
-        index: entities.len() - 1,
-        movement: 0,
-        score: 0,
-        label: Label::new(
+    let mut paddle1 = Paddle::new(
+        entities.len() - 1,
+        0,
+        0,
+        Label::new(
             String::from("0"), 
             &font, 
             Point::new(
@@ -392,7 +293,7 @@ fn main() -> Result<(), String> {
             Color::RED, 
             &texture_creator
         )?
-    };
+    );
     entities.push(Entity {
         position: Point::new(
             (WINDOW_HALF_SIZE.0 as i32) - PADDLE_COLLIDER_SIZE.0 as i32, 0
@@ -403,11 +304,11 @@ fn main() -> Result<(), String> {
             rect: Rect::new(52, 0, PADDLE_SIZE.0, PADDLE_SIZE.1)
         }
     });
-    let mut paddle2 = PaddleData {
-        index: entities.len() - 1,
-        movement: 0,
-        score: 0,
-        label: Label::new(
+    let mut paddle2 = Paddle::new(
+        entities.len() - 1,
+        0,
+        0,
+        Label::new(
             String::from("0"), 
             &font, 
             Point::new(
@@ -417,7 +318,7 @@ fn main() -> Result<(), String> {
             Color::BLUE, 
             &texture_creator
         )?    
-    };
+    );
     entities.push(Entity {
         position: Point::new(0, 0),
         size: BALL_SIZE,
@@ -426,10 +327,10 @@ fn main() -> Result<(), String> {
             rect: Rect::new(100, 0, BALL_SIZE.0, BALL_SIZE.1)
         }
     });
-    let mut ball = BallData {
-        index: entities.len() - 1,
-        movement: Point::new(BALL_SPEED as i32, BALL_SPEED as i32)
-    };
+    let mut ball = Ball::new(
+        entities.len() - 1,
+        Point::new(BALL_SPEED as i32, BALL_SPEED as i32)
+    );
     // Game loop
     'running: loop {
         // Handle events
