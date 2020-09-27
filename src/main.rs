@@ -6,10 +6,11 @@ use sdl2::keyboard::Keycode;
 use sdl2::pixels::Color;
 use sdl2::render::WindowCanvas;
 use sdl2::rect::{Point, Rect};
-use sdl2::image::{self, LoadTexture};
+use sdl2::image::{self, LoadTexture, LoadSurface};
 use sdl2::mixer::{self, DEFAULT_CHANNELS, AUDIO_S16LSB, Music};
 use sdl2::ttf::{self, Sdl2TtfContext};
 use sdl2::{Sdl, EventPump};
+use sdl2::surface::Surface;
 use std::time::Duration;
 use std::cmp::{max, min};
 use gui::Label;
@@ -30,6 +31,7 @@ const SPRITESHEET_FILENAME: &str = "assets/spritesheet.png";
 const POP_SOUND_FILENAME: &str = "assets/pop.ogg";
 const SCORE_SOUND_FILENAME: &str = "assets/score.ogg";
 const FONT_FILENAME: &str = "assets/sansation.ttf";
+const APP_ICON_FILENAME: &str = "assets/icon.png";
 
 enum BallUpdateState {
     PaddleCollision,
@@ -256,10 +258,11 @@ fn main() -> Result<(), String> {
         .expect(&format!("Could not load audio: {}", SCORE_SOUND_FILENAME));
     let video_subsystem = sdl_context.video()
         .expect("Could not initialize video system");
-    let window = video_subsystem.window("Pong", WINDOW_SIZE.0, WINDOW_SIZE.1)
+    let mut window = video_subsystem.window("Pong", WINDOW_SIZE.0, WINDOW_SIZE.1)
         .position_centered()
         .build()
         .expect("Could not initialize window");
+    window.set_icon(Surface::from_file(APP_ICON_FILENAME)?);
     let mut canvas = window.into_canvas()
         .build()
         .expect("Could not create a canvas");
